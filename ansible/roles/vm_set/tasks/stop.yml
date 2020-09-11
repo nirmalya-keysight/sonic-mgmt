@@ -6,15 +6,28 @@
   set_fact: VM_hosts={{ VM_hosts | filter_vm_targets(topology['VMs'], VM_base) | sort }}
   when: topology['VMs'] is defined and VM_base is defined
 
-- name: Remove VMs.
-  include_tasks: stop_vm.yml
-  vars:
-    vm_name: "{{ item }}"
-    disk_image: "{{ root_path }}/disks/{{ vm_name }}_hdd.vmdk"
-  with_items: "{{ VM_hosts }}"
+- name: veos - Remove VMs
+  block:
+  - name: Remove VMs.
+    include_tasks: stop_vm.yml
+    vars:
+      vm_name: "{{ item }}"
+      disk_image: "{{ root_path }}/disks/{{ vm_name }}_hdd.vmdk"
+    with_items: "{{ VM_hosts }}"
+  when: VM_type is defined and VM_type != "keysight_vtm"
+
+- name: Keysight - Remove VTMs
+  block:
+  - name: Remove Keysight VMs
+    include_tasks: stop_vm.yml
+    vars:
+      vm_name: "{{ item }}"
+      disk_image: "{{ root_path }}/disks/{{ vm_name }}/"
+    with_items: "{{ VM_hosts }}"
+  when: VM_type is defined and VM_type == "keysight_vtm"
 
 - name: Destroy VMs network
   vm_topology:
     cmd: 'destroy'
-    vm_names:     "{{ VM_hosts }}"
+    vm_names: "{{ VM_hosts }}"
   become: yes

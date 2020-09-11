@@ -15,6 +15,31 @@
 
 # Need latest ubuntu 4.10 kernel to fix a openvswitch bug
 # https://bugs.launchpad.net/ubuntu/+source/kernel-package/+bug/1685742
+- name: Keysight - Check if CPU virtualization is enabled in testbed
+  block:
+  - name: Define variables
+    set_fact:
+      virtualization_supported: True
+      reboot_needed: False
+
+  - name: Get CPU virtualization info
+    shell:
+      cmd: cat /proc/cpuinfo | grep -E '(vmx|svm)' | wc -l
+    register: virt_info
+    ignore_errors: True
+
+  - name: Parse CPU virtualization output
+    set_fact:
+      virtualization_supported: False
+    when: virt_info.stdout|int < 1
+    ignore_errors: True
+
+  - fail:
+      msg: "[ERROR] CPU Virtualization not supported. Exiting. Please enable hardware or CPU virtualization. Verify with - cat /proc/cpuinfo | grep -E '(vmx|svm)'"
+    when: virtualization_supported != True
+
+  when: VM_type is defined and VM_type == "keysight_vtm"
+
 - name: get host distribution
   shell: grep ^NAME /etc/os-release | awk -F '=' '{print $2}' | tr -d '"'
   register: host_distribution
@@ -92,6 +117,46 @@
   become: yes
   when: host_distribution_version.stdout == "20.04"
 
+- name: Keysight - Ensure necessary KVM is setup
+  block:
+  - name: Check if KVM ready
+    command: kvm-ok
+    # become: yes
+    ignore_errors: True
+    register: kvmok
+
+  - block:
+    - name: Install kvm packages
+      become: yes
+      apt:
+        pkg:
+        - qemu
+        - qemu-kvm
+        - bridge-utils
+        - virt-manager
+        - libvirt-bin
+        - libvirt-daemon
+        - libvirt-clients
+        - cpu-checker
+        - genisoimage
+        state: present
+
+    - name: Enable libvirtd
+      become: yes
+      service:
+        name: libvirtd
+        state: started
+        enabled: yes
+
+    - name: Check if KVM ready now
+      command: kvm-ok
+      # become: yes
+      ignore_errors: True
+      register: kvmok2
+
+    when: kvmok.rc != 0
+  when: VM_type is defined and VM_type == "keysight_vtm"
+
 - include_tasks: docker.yml
 
 - name: Ensure {{ ansible_user }} in docker,sudo group
@@ -114,6 +179,16 @@
   modprobe: name=br_netfilter state=present
 
 - name: Set sysctl bridge parameters for testbed
+  sysctl:
+    name: "{{ item }}"
+    value: "1"
+    sysctl_set: yes
+  become: yes
+  with_items:
+  - net.ipv4.ip_forward
+  when: VM_type is defined and VM_type == "keysight_vtm"
+
+- name: Unset sysctl bridge parameters for testbed
   sysctl:
     name: "{{ item }}"
     value: "0"
@@ -162,14 +237,15 @@
 
 - name: veos VMs not needed when setting up Kubernetes master
   set_fact:
-    veos_vm_required: false 
-  when: 
+    veos_vm_required: false
+  when:
     - k8s is defined
 
 - name: VMs not needed in case of Keysight API Server
   set_fact:
     veos_vm_required: false
   when:
+    - VM_type is defined and VM_type != "keysight_vtm"
     - ptf_imagename is defined
     - ptf_imagename == "docker-keysight-api-server"
 
@@ -191,7 +267,7 @@
         uri=qemu:///system
         state=pause
   register: vm_list_paused
-  become: true  
+  become: true
 
 - block:
     - name: Ensure {{ root_path }} exists

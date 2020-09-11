@@ -39,18 +39,99 @@
         or secret_group_vars.ixia_api_server is not defined
         or secret_group_vars.ixia_api_server.rest_port is not defined
 
-    - name: Pull and start Keysight API Server container
-      docker_container:
-        name: apiserver
-        image: "{{ docker_registry_host }}/{{ ptf_imagename }}:{{ ptf_imagetag }}"
-        pull: yes
-        state: started
-        restart: no
-        published_ports: "{{ secret_group_vars.ixia_api_server.rest_port }}:443"
-        detach: True
-        capabilities:
-          - net_admin
-        privileged: yes
+    - name: Define variables for IxNetwork API Server deployment
+      set_fact:
+        local_src_image_location: "/images"
+        unzipped_image: "{{ ixnetwork_api_server_docker_image_file }}.bz2"
+
+    - name: "Check if IxNetwork API Server docker needs to be considered from {{ local_src_image_location }}/{{ unzipped_image }}"
+      stat: path={{ local_src_image_location }}/{{ unzipped_image }}
+      register: deploy_ixn_api_docker_from_file
+      delegate_to: localhost
+
+    - block:
+        - name: "Check if IxNetwork API Server docker image at {{ local_src_image_location }}/{{ ixnetwork_api_server_docker_image_file }} needs to be extracted"
+          stat: path={{ local_src_image_location }}/{{ ixnetwork_api_server_docker_image_file }}
+          register: extract_ixn_api_docker_image
+          delegate_to: localhost
+
+        - name: "Check if IxNetwork API Server docker image zipped file {{ local_src_image_location }}/{{ unzipped_image }} present"
+          stat: path={{ local_src_image_location }}/{{ unzipped_image }}
+          register: ixn_api_docker_image_exists
+          delegate_to: localhost
+          when: extract_ixn_api_docker_image.stat is defined and not extract_ixn_api_docker_image.stat.exists
+
+        - name: "Extract the image file at{{ local_src_image_location }}/{{ ixnetwork_api_server_docker_image_file }} from {{ ixnetwork_api_server_docker_image_file }}.bz2"
+          shell:
+            cmd: "tar xvjf {{ ixnetwork_api_server_docker_image_file }}.bz2"
+            chdir: "{{ local_src_image_location }}"
+          when:  ixn_api_docker_image_exists.stat is defined and ixn_api_docker_image_exists.stat.exists and extract_ixn_api_docker_image.stat is defined and not extract_ixn_api_docker_image.stat.exists
+          delegate_to: localhost
+
+        - name: "Copy the src image to remote. (One time execution) {{ root_path }}/images"
+          copy: src={{ local_src_image_location }}/{{ ixnetwork_api_server_docker_image_file }} dest={{ root_path }}/images
+
+        - name: "Load IxNetwork Api Server docker container from {{ ixnetwork_api_server_docker_image_file }}.tar"
+          shell:
+            cmd: "docker load -i {{ ixnetwork_api_server_docker_image_file }}"
+            chdir: "{{ root_path }}/images"
+
+        - name: Start Keysight API Server container
+          docker_container:
+            name: apiserver
+            image: "{{ ixnetwork_api_server_docker_image_name }}"
+            pull: no
+            state: started
+            restart: no
+            published_ports: "{{ secret_group_vars.ixia_api_server.rest_port }}:443"
+            detach: True
+            capabilities:
+              - net_admin
+            privileged: yes
+          become: yes
+      when: deploy_ixn_api_docker_from_file.stat is defined and deploy_ixn_api_docker_from_file.stat.exists
+
+    - block:
+      - name: Pull and start Keysight API Server container
+        docker_container:
+          name: apiserver
+          image: "{{ docker_registry_host }}/{{ ptf_imagename }}:{{ ptf_imagetag }}"
+          pull: yes
+          state: started
+          restart: no
+          published_ports: "{{ secret_group_vars.ixia_api_server.rest_port }}:443"
+          detach: True
+          capabilities:
+            - net_admin
+          privileged: yes
+        become: yes
+      when: deploy_ixn_api_docker_from_file.stat is defined and not deploy_ixn_api_docker_from_file.stat.exists
+
+    - name: Keysight Set front panel/mgmt port for dut
+      include_tasks: set_dut_port.yml
+
+    - name: Keysight Setup vlan port for vlan tunnel
+      vlan_port:
+        external_port: "{{ external_port }}"
+        vlan_ids: "{{ device_vlan_list }}"
+        is_multi_duts: "{{ dut_name is defined and dut_name.split(',')|length > 1 }}"
+        cmd: "create"
+      become: yes
+      when: external_port is defined
+
+    - name: Keysight Bind topology {{ topo }} to VMs. base vm = {{ VM_base }}
+      vm_topology:
+        cmd: "keysight_bind"
+        vm_set_name: "{{ vm_set_name }}"
+        topo: "{{ topology }}"
+        vm_names: "{{ VM_hosts }}"
+        vm_base: "{{ VM_base }}"
+        mgmt_bridge: "{{ mgmt_bridge }}"
+        dut_fp_ports: "{{ dut_fp_ports }}"
+        dut_mgmt_port: "{{ dut_mgmt_port }}"
+        fp_mtu: "{{ fp_mtu_size }}"
+        max_fp_num: "2"
+        is_multi_duts: "{{ dut_name is defined and dut_name.split(',')|length > 1 }}"
       become: yes
   when: container_type == "API-SERVER"
 

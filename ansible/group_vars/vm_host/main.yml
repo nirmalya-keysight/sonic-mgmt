@@ -10,3 +10,10 @@ max_fp_num: 4
 
 ptf_bp_ip: 10.10.246.254/24
 ptf_bp_ipv6: fc0a::ff/64
+
+##################################
+# Keysight config
+##################################
+vtm_image_name: Ixia_Virtual_Test_Appliance_9.10_KVM.qcow2
+ixnetwork_api_server_docker_image_file: Ixia_IxNetworkWeb_Docker_9.10.2007.146.tar
+ixnetwork_api_server_docker_image_name: ixnetworkweb_9.10.2007.146_image

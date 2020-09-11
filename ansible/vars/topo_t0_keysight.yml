@@ -1,0 +1,80 @@
+# Refer to https://github.com/Azure/sonic-mgmt/blob/master/ansible/doc/README.testbed.Internal.mdhttps://github.com/Azure/sonic-mgmt/blob/master/ansible/doc/README.testbed.Internal.md
+topology:
+  # host_interfaces: # defines a list of port offsets which would be inserted into the PTF container
+
+  # disabled_host_interfaces:
+
+  VMs:
+    VTM01T1:
+      vlans:
+        - 28
+      vm_offset: 0
+      vtm_port_index: 0
+    VTM01T2:
+      vlans:
+        - 29
+      vm_offset: 0
+      vtm_port_index: 1
+  DUT:
+    vlan_configs:
+      default_vlan_config: one_vlan_a
+      one_vlan_a:
+        Vlan1000:
+          id: 1000
+          intfs: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
+          prefix: 192.168.0.1/21
+          prefix_v6: fc02:1000::1/64
+          tag: 1000
+
+configuration_properties:
+  common:
+    dut_asn: 65100
+    dut_type: ToRRouter
+    swrole: leaf
+    nhipv4: 10.10.246.254
+    nhipv6: FC0A::FF
+
+configuration:
+  VTM01T1:
+    properties:
+    - common
+    bgp:
+      asn: 64600
+      peers:
+        65100:
+        - 10.0.0.56
+        - FC00::71
+    interfaces:
+      Loopback0:
+        ipv4: 100.1.0.29/32
+        ipv6: 2064:100::1d/128
+      Ethernet1:
+        lacp: 1
+      Port-Channel1:
+        ipv4: 10.0.0.57/31
+        ipv6: fc00::72/126
+    # bp_interface:
+    #   ipv4: 10.10.246.29/24
+    #   ipv6: fc0a::1d/64
+
+  VTM01T2:
+    properties:
+    - common
+    bgp:
+      asn: 64600
+      peers:
+        65100:
+        - 10.0.0.58
+        - FC00::75
+    interfaces:
+      Loopback0:
+        ipv4: 100.1.0.30/32
+        ipv6: 2064:100::1e/128
+      Ethernet1:
+        lacp: 1
+      Port-Channel1:
+        ipv4: 10.0.0.59/31
+        ipv6: fc00::76/126
+    # bp_interface:
+    #   ipv4: 10.10.246.30/24
+    #   ipv6: fc0a::1e/64

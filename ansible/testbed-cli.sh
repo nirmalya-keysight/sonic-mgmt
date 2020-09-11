@@ -13,12 +13,12 @@ function usage
   echo "    $0 [options] (connect-vms | disconnect-vms) <topo-name> <vault-password-file>"
   echo "    $0 [options] config-vm <topo-name> <vm-name> <vault-password-file>"
   echo "    $0 [options] (gen-mg | deploy-mg | test-mg) <topo-name> <inventory> <vault-password-file>"
-  echo "    $0 [options] (create-master | destroy-master) <k8s-server-name> <vault-password-file>" 
-  echo 
+  echo "    $0 [options] (create-master | destroy-master) <k8s-server-name> <vault-password-file>"
+  echo
   echo "Options:"
   echo "    -t <tbfile>     : testbed CSV file name (default: 'testbed.csv')"
   echo "    -m <vmfile>     : virtual machine file name (default: 'veos')"
-  echo "    -k <vmtype>     : vm type (veos|ceos) (default: 'veos')"
+  echo "    -k <vmtype>     : vm type (veos|ceos|keysight_vtm) (default: 'veos')"
   echo "    -n <vm_num>     : vm num (default: 0)"
   echo "    -s <msetnumber> : master set identifier on specified <k8s-server-name> (default: 1)"
   echo
@@ -108,7 +108,8 @@ function start_vms
   shift
   echo "Starting VMs on server '${server}'"
 
-  ANSIBLE_SCP_IF_SSH=y ansible-playbook -i $vmfile -e VM_num="$vm_num" testbed_start_VMs.yml \
+  ANSIBLE_SCP_IF_SSH=y ansible-playbook -i $vmfile -e VM_num="$vm_num" \
+      -e VM_type="$vm_type" testbed_start_VMs.yml \
       --vault-password-file="${passwd}" -l "${server}" $@
 }
 
@@ -120,7 +121,8 @@ function stop_vms
   shift
   echo "Stopping VMs on server '${server}'"
 
-  ANSIBLE_SCP_IF_SSH=y ansible-playbook -i $vmfile testbed_stop_VMs.yml --vault-password-file="${passwd}" -l "${server}" $@
+  ANSIBLE_SCP_IF_SSH=y ansible-playbook -i $vmfile -e VM_type="$vm_type" \
+      testbed_stop_VMs.yml --vault-password-file="${passwd}" -l "${server}" $@
 }
 
 function start_topo_vms
@@ -346,7 +348,7 @@ function setup_k8s_vms
   passwd=$2
 
   echo "Setting up Kubernetes VMs on server '${server}'"
- 
+
   ANSIBLE_SCP_IF_SSH=y ansible-playbook -i $vmfile testbed_setup_k8s_master.yml -e servernumber="${servernumber}" -e k8s="true" -e msetnumber="${msetnumber}"
 }
 
@@ -357,7 +359,7 @@ function stop_k8s_vms
   passwd=$2
   shift
   shift
-  
+
   echo "Stopping Kubernetes VMs on server '${server}'"
 
   ANSIBLE_SCP_IF_SSH=y ansible-playbook -i $vmfile testbed_stop_k8s_VMs.yml --vault-password-file="${passwd}" -l "${server}" -e k8s="true" $@
@@ -435,7 +437,7 @@ case "${subcmd}" in
                  setup_k8s_vms $@
                ;;
   destroy-master) stop_k8s_vms $@
-               ;; 
+               ;;
   *)           usage
                ;;
 esac

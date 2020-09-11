@@ -12,6 +12,6 @@
   when: vm_name in vm_list_defined.list_vms
   become: yes
 
-- name: Remove arista disk image for {{ vm_name }}
+- name: Remove arista or VTM  disk image for {{ vm_name }}
   file: path={{ disk_image }} state=absent
 

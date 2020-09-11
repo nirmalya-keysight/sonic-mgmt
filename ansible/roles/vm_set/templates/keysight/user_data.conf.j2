@@ -1,0 +1,7 @@
+#cloud-config
+runcmd:
+ - sudo -i -u admin set ip eth0 {{ mgmt_ip_address }} {{ netmask }} {{ mgmt_gw }}
+ - sudo -i -u admin set license-check disable
+ - sudo -i -u admin restart-service network
+ - sudo -i -u admin set promiscuous-mode all all enable
+ - sudo -i -u admin set mtu all all 9000

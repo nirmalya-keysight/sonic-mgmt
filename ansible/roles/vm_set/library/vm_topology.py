@@ -85,6 +85,19 @@ EXAMPLES = '''
     dut_fp_ports: "{{ dut_fp_ports }}"
     fp_mtu: "{{ fp_mtu_size }}"
     max_fp_num: "{{ max_fp_num }}
+
+- name: Keysight Bind topology {{ topo }} to VTMs. base vm = {{ VM_base }}
+  vm_topology:
+    cmd: "keysight_bind"
+    vm_set_name: "{{ vm_set_name }}"
+    topo: "{{ topology }}"
+    vm_names: "{{ VM_hosts }}"
+    vm_base: "{{ VM_base }}"
+    mgmt_bridge: "{{ mgmt_bridge }}"
+    dut_mgmt_port: "{{ dut_mgmt_port }}"
+    dut_fp_ports: "{{ dut_fp_ports }}"
+    fp_mtu: "{{ fp_mtu_size }}"
+    max_fp_num: "{{ max_fp_num }}
 '''
 
 
@@ -132,7 +145,8 @@ class VMTopology(object):
 
     host_interfaces = HostInterfaces()
 
-    def __init__(self, vm_names, fp_mtu, max_fp_num):
+    def __init__(self, vm_names, fp_mtu, max_fp_num, is_keysight):
+        self.is_keysight = is_keysight
         self.vm_names = vm_names
         self.fp_mtu = fp_mtu
         self.max_fp_num = max_fp_num
@@ -168,14 +182,20 @@ class VMTopology(object):
 
         self.dut_fp_ports = dut_fp_ports
 
-        self.injected_fp_ports = self.extract_vm_vlans()
+        if self.is_keysight is False:
+            self.injected_fp_ports = self.extract_vm_vlans()
+        else:
+            self.injected_fp_ports = None
 
         if ptf_exists:
             self.pid = VMTopology.get_pid(PTF_NAME_TEMPLATE % vm_set_name)
         else:
             self.pid = None
 
-        self.bp_bridge = ROOT_BACK_BR_TEMPLATE % self.vm_set_name
+        if self.is_keysight is False:
+            self.bp_bridge = ROOT_BACK_BR_TEMPLATE % self.vm_set_name
+        else:
+            self.bp_bridge = None
 
         self.update()
 
@@ -384,11 +404,20 @@ class VMTopology(object):
     def bind_fp_ports(self, disconnect_vm=False):
         for attr in self.VMs.values():
             for vlan_num, vlan in enumerate(attr['vlans']):
-                injected_iface = INJECTED_INTERFACES_TEMPLATE % (self.vm_set_name, vlan)
-                br_name = OVS_FP_BRIDGE_TEMPLATE % (self.vm_names[self.vm_base_index + attr['vm_offset']], vlan_num)
-                vm_iface = OVS_FP_TAP_TEMPLATE % (self.vm_names[self.vm_base_index + attr['vm_offset']], vlan_num)
-                self.bind_ovs_ports(br_name, self.dut_fp_ports[vlan], injected_iface, vm_iface, disconnect_vm)
+                if self.is_keysight is False:
+                    injected_iface = INJECTED_INTERFACES_TEMPLATE % (self.vm_set_name, vlan)
+                else:
+                    injected_iface = None
 
+                if self.is_keysight is False:
+                    br_name = OVS_FP_BRIDGE_TEMPLATE % (self.vm_names[self.vm_base_index + attr['vm_offset']], vlan_num)
+                    vm_iface = OVS_FP_TAP_TEMPLATE % (self.vm_names[self.vm_base_index + attr['vm_offset']], vlan_num)
+                else:
+                    i = attr['vtm_port_index']
+                    br_name = OVS_FP_BRIDGE_TEMPLATE % (self.vm_names[self.vm_base_index + attr['vm_offset']], i)
+                    vm_iface = OVS_FP_TAP_TEMPLATE % (self.vm_names[self.vm_base_index + attr['vm_offset']], i)
+
+                self.bind_ovs_ports(br_name, self.dut_fp_ports[vlan], injected_iface, vm_iface, disconnect_vm)
         return
 
     def unbind_fp_ports(self):
@@ -430,25 +459,28 @@ class VMTopology(object):
 
     def bind_ovs_ports(self, br_name, dut_iface, injected_iface, vm_iface, disconnect_vm=False):
         """bind dut/injected/vm ports under an ovs bridge"""
-        br = VMTopology.get_ovs_bridge_by_port(injected_iface)
-        if br is not None and br != br_name:
-            VMTopology.cmd('ovs-vsctl del-port %s %s' % (br, injected_iface))
+        if self.is_keysight is False and injected_iface is not None:
+            br = VMTopology.get_ovs_bridge_by_port(injected_iface)
+            if br is not None and br != br_name:
+                VMTopology.cmd('ovs-vsctl del-port %s %s' % (br, injected_iface))
 
         br = VMTopology.get_ovs_bridge_by_port(dut_iface)
         if br is not None and br != br_name:
             VMTopology.cmd('ovs-vsctl del-port %s %s' % (br, dut_iface))
 
         ports = VMTopology.get_ovs_br_ports(br_name)
-        if injected_iface not in ports:
-            VMTopology.cmd('ovs-vsctl add-port %s %s' % (br_name, injected_iface))
+        if self.is_keysight is False and injected_iface is not None:
+            if injected_iface not in ports:
+                VMTopology.cmd('ovs-vsctl add-port %s %s' % (br_name, injected_iface))
 
         if dut_iface not in ports:
             VMTopology.cmd('ovs-vsctl add-port %s %s' % (br_name, dut_iface))
 
         bindings = VMTopology.get_ovs_port_bindings(br_name, dut_iface)
         dut_iface_id = bindings[dut_iface]
-        injected_iface_id = bindings[injected_iface]
         vm_iface_id = bindings[vm_iface]
+        if self.is_keysight is False:
+            injected_iface_id = bindings[injected_iface]
 
         # clear old bindings
         VMTopology.cmd('ovs-ofctl del-flows %s' % br_name)
@@ -460,15 +492,22 @@ class VMTopology(object):
             # Add flow from a VM to an external iface
             VMTopology.cmd("ovs-ofctl add-flow %s table=0,in_port=%s,action=output:%s" % (br_name, vm_iface_id, dut_iface_id))
 
-        if disconnect_vm:
-            # Add flow from external iface to ptf container
-            VMTopology.cmd("ovs-ofctl add-flow %s table=0,in_port=%s,action=output:%s" % (br_name, dut_iface_id, injected_iface_id))
+        if self.is_keysight is False:
+            if disconnect_vm:
+                # Add flow from external iface to ptf container
+                VMTopology.cmd("ovs-ofctl add-flow %s table=0,in_port=%s,action=output:%s" % (br_name, dut_iface_id, injected_iface_id))
+            else:
+                # Add flow from external iface to a VM and a ptf container
+                VMTopology.cmd("ovs-ofctl add-flow %s table=0,in_port=%s,action=output:%s,%s" % (br_name, dut_iface_id, vm_iface_id, injected_iface_id))
         else:
-            # Add flow from external iface to a VM and a ptf container
-            VMTopology.cmd("ovs-ofctl add-flow %s table=0,in_port=%s,action=output:%s,%s" % (br_name, dut_iface_id, vm_iface_id, injected_iface_id))
+            if disconnect_vm:
+                pass  # Revisit
+            else:
+                VMTopology.cmd("ovs-ofctl add-flow %s table=0,in_port=%s,action=output:%s" % (br_name, dut_iface_id, vm_iface_id))
 
-        # Add flow from a ptf container to an external iface
-        VMTopology.cmd("ovs-ofctl add-flow %s table=0,in_port=%s,action=output:%s" % (br_name, injected_iface_id, dut_iface_id))
+        if self.is_keysight is False:
+            # Add flow from a ptf container to an external iface
+            VMTopology.cmd("ovs-ofctl add-flow %s table=0,in_port=%s,action=output:%s" % (br_name, injected_iface_id, dut_iface_id))
 
         return
 
@@ -726,7 +765,7 @@ def check_params(module, params, mode):
 def main():
     module = AnsibleModule(
         argument_spec=dict(
-            cmd=dict(required=True, choices=['create', 'bind', 'renumber', 'unbind', 'destroy', "connect-vms", "disconnect-vms"]),
+            cmd=dict(required=True, choices=['create', 'bind', 'keysight_bind', 'renumber', 'unbind', 'destroy', "connect-vms", "disconnect-vms"]),
             vm_set_name=dict(required=False, type='str'),
             topo=dict(required=False, type='dict'),
             vm_names=dict(required=True, type='list'),
@@ -750,6 +789,10 @@ def main():
     fp_mtu = module.params['fp_mtu']
     max_fp_num = module.params['max_fp_num']
     dut_mgmt_port = None
+    if cmd == 'keysight_bind':
+        is_keysight = True
+    else:
+        is_keysight = False
 
     curtime = datetime.datetime.now().isoformat()
 
@@ -761,7 +804,7 @@ def main():
         if os.path.exists(cmd_debug_fname) and os.path.isfile(cmd_debug_fname):
             os.remove(cmd_debug_fname)
 
-        net = VMTopology(vm_names, fp_mtu, max_fp_num)
+        net = VMTopology(vm_names, fp_mtu, max_fp_num, is_keysight)
 
         if cmd == 'create':
             net.create_bridges()
@@ -818,6 +861,37 @@ def main():
 
             if hostif_exists:
                 net.inject_host_ports()
+        elif cmd == 'keysight_bind':
+            check_params(module, ['vm_set_name',
+                                  'topo',
+                                  'mgmt_bridge',
+                                  'dut_fp_ports'], cmd)
+
+            vm_set_name = module.params['vm_set_name']
+            topo = module.params['topo']
+            dut_fp_ports = module.params['dut_fp_ports']
+            is_multi_duts = module.params['is_multi_duts']
+
+            if len(vm_set_name) > VM_SET_NAME_MAX_LEN:
+                raise Exception("vm_set_name can't be longer than %d characters: %s (%d)" % (VM_SET_NAME_MAX_LEN, vm_set_name, len(vm_set_name)))
+
+            hostif_exists, vms_exists = check_topo(topo, is_multi_duts)
+
+            if vms_exists:
+                check_params(module, ['vm_base'], cmd)
+                vm_base = module.params['vm_base']
+            else:
+                vm_base = None
+
+            net.init(vm_set_name, topo, vm_base, dut_fp_ports, ptf_exists=False,
+                     is_multi_duts=is_multi_duts)
+
+            mgmt_bridge = module.params['mgmt_bridge']
+            if module.params['dut_mgmt_port']:
+                net.bind_mgmt_port(mgmt_bridge, module.params['dut_mgmt_port'])
+
+            if vms_exists:
+                net.bind_fp_ports()
         elif cmd == 'unbind':
             check_params(module, ['vm_set_name',
                                   'topo',
@@ -938,4 +1012,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

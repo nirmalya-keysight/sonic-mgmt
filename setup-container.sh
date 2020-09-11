@@ -18,6 +18,8 @@ function show_help_and_exit() {
     echo "                      |   3. The remote image at \"sonicdev-microsoft.azurecr.io:443/docker-sonic-mgmt\""
     echo ""
     echo "-d <directory>        : specify directory inside container to bind mount to sonic-mgmt root (default \"/var/src/\")"
+    echo ""
+    echo "-v <directory>        : specify directory containing VM iamge files to be mounted in container at /images."
     exit $1
 }
 
@@ -26,7 +28,11 @@ function start_and_config_container() {
     SCRIPT_DIR=`dirname $0`
     cd $SCRIPT_DIR
     PARENT_DIR=`pwd`/..
-    docker run --name $CONTAINER_NAME -v $PARENT_DIR:$LINK_DIR -d -t $IMAGE_ID bash > /dev/null
+    if [[ -z ${IMG_DIR} ]]; then
+        docker run --name $CONTAINER_NAME -v $PARENT_DIR:$LINK_DIR -d -t $IMAGE_ID bash > /dev/null
+    else
+        docker run --name $CONTAINER_NAME -v $PARENT_DIR:$LINK_DIR -v $IMG_DIR:/images -d -t $IMAGE_ID bash > /dev/null
+    fi
 
     if [[ "$?" != 0 ]]; then
         echo "Container creation failed, exiting"
@@ -94,12 +100,12 @@ function validate_parameters() {
             IMAGE_ID=$DOCKER_SONIC_MGMT
         elif docker images --format "{{.Repository}}" | grep -q "^${DOCKER_REGISTRY}${DOCKER_SONIC_MGMT}$"; then
             IMAGE_ID=${DOCKER_REGISTRY}${DOCKER_SONIC_MGMT}
-        elif echo "Pulling image from registry" && docker pull ${DOCKER_REGISTRY}${DOCKER_SONIC_MGMT}; then 
-            IMAGE_ID=${DOCKER_REGISTRY}${DOCKER_SONIC_MGMT}  
+        elif echo "Pulling image from registry" && docker pull ${DOCKER_REGISTRY}${DOCKER_SONIC_MGMT}; then
+            IMAGE_ID=${DOCKER_REGISTRY}${DOCKER_SONIC_MGMT}
         else
             echo "Unable to find a usable default image, please specify one manually"
             show_help_and_exit 1
-            
+
         fi
         echo "Using default image $IMAGE_ID"
     fi
@@ -114,7 +120,7 @@ if [[ "$#" == 0 ]]; then
     show_help_and_exit 0
 fi
 
-while getopts "h?n:i:d:" opt; do
+while getopts "h?n:i:d:v::" opt; do
     case ${opt} in
         h|\? )
             show_help_and_exit 0
@@ -127,6 +133,9 @@ while getopts "h?n:i:d:" opt; do
             ;;
         d )
             LINK_DIR=${OPTARG}
+            ;;
+        v )
+            IMG_DIR=${OPTARG}
             ;;
         u )
             DOCKER_USER=${OPTARG}

@@ -18,21 +18,88 @@
 - name: Device debug output
   debug: msg="hostname = {{ hostname }} serial port = {{ serial_port }} ip = {{ mgmt_ip_address }}"
 
-- name: Check destination file existance
-  stat: path={{ disk_image }}
-  register: file_stat
+- block:
+  - name: Check destination file existance
+    stat: path={{ disk_image }}
+    register: file_stat
 
-- name: Copy arista disk image for {{ hostname }}
-  copy: src={{ src_disk_image }} dest={{ disk_image }} remote_src=True
-  when: not file_stat.stat.exists
+  - name: Copy arista disk image for {{ hostname }}
+    copy: src={{ src_disk_image }} dest={{ disk_image }} remote_src=True
+    when: not file_stat.stat.exists
+  when: VM_type is defined and VM_type != "keysight_vtm"
 
-- name: Define vm {{ vm_name }}
-  virt: name={{ vm_name }}
-        command=define
-        xml="{{ lookup('template', 'templates/arista.xml.j2') }}"
-        uri=qemu:///system
-  when: vm_name not in vm_list_defined.list_vms
-  become: yes
+- name: Keysight - Prepare disks for VTM
+  block:
+  - name: "Check if Keysight VTM image at the VM specific folder {{ disk_image }} at testbed server"
+    stat: path="{{ disk_image }}"
+    register: image_for_VTM
+
+  - block:
+    - name: "Create Keysight VTM specific directory {{ disk_image_dir }}"
+      file: path="{{ disk_image_dir }}" state=directory mode=0755
+
+    - name: "Create VM specific version {{ disk_image }} from {{ src_disk_image }}"
+      command: "qemu-img create -f qcow2 {{ disk_image }} -b {{ src_disk_image }}"
+    when: not image_for_VTM.stat.exists
+
+  - name: "Get netmask from {{ mgmt_prefixlen }}"
+    shell:
+      cmd: python -c "print ('.'.join([str((0xffffffff << (32 - {{ mgmt_prefixlen }}) >> i) & 0xff) for i in [24, 16, 8, 0]]))"
+    register: netmask_val
+
+  - name: "Set netmask value to {{ netmask_val.stdout }}"
+    set_fact:
+      netmask: "{{ netmask_val.stdout }}"
+
+  - name: "Prepare user-data for {{ vm_name }}"
+    template:
+      src: "templates/keysight/user_data.conf.j2"
+      dest: "{{ disk_image_dir }}/user-data"
+
+  - name: "Prepare meta_data for {{ vm_name }}"
+    blockinfile:
+      block: "{{ lookup('file', 'templates/keysight/meta_data.conf') }}"
+      dest: "{{ disk_image_dir }}/meta-data"
+      create: yes
+
+  - name: Check if config iso available
+    stat: path="{{ disk_image_dir }}/config.iso"
+    register: vtm_config_iso_file
+
+  - name: Remove existing "{{ disk_image_dir }}/config.iso"
+    file:
+      path: "{{ disk_image_dir }}/config.iso"
+      state: absent
+    when: vtm_config_iso_file.stat.exists
+
+  - name: "Prepare config-iso for {{ vm_name }}"
+    shell:
+      cmd: "genisoimage -o config.iso -V cidata -r -J user-data meta-data"
+      chdir: "{{ disk_image_dir }}"
+
+  when: VM_type is defined and VM_type == "keysight_vtm"
+
+- name: veos - define VMs
+  block:
+  - name: Define vm {{ vm_name }}
+    virt: name={{ vm_name }}
+          command=define
+          xml="{{ lookup('template', 'templates/arista.xml.j2') }}"
+          uri=qemu:///system
+    when: vm_name not in vm_list_defined.list_vms
+    become: yes
+  when: VM_type is defined and VM_type != "keysight_vtm"
+
+- name: Keysight - define VTMs
+  block:
+  - name: Define vm {{ vm_name }}
+    virt: name={{ vm_name }}
+          command=define
+          xml="{{ lookup('template', 'templates/keysight/vtm_sample.xml.j2') }}"
+          uri=qemu:///system
+    when: vm_name not in vm_list_defined.list_vms
+    become: yes
+  when: VM_type is defined and VM_type == "keysight_vtm"
 
 - name: Destroy vm {{ vm_name }} if it requires fix
   virt: name={{ vm_name }}
@@ -48,6 +115,53 @@
         uri=qemu:///system
   when: vm_name not in vm_list_running.list_vms or vm_name in respin_vms
   become: yes
+
+- name: Keysight - Ensure the IxServer process is running in VTMs
+  block:
+  - name: "Wait for IxServer access port for {{ vm_name }} {{ mgmt_ip_address }}"
+    wait_for:
+      host: "{{ mgmt_ip_address }}"
+      port: 443
+      delay: 10
+      # state: started
+
+  - name: "Get access to ixserver in {{ vm_name }} {{ mgmt_ip_address }}"
+    uri:
+      url: "https://{{ mgmt_ip_address }}/platform/api/v1/auth/session"
+      method: POST
+      follow_redirects: all
+      validate_certs: false
+      body_format: json
+      body: {"username": "admin", "password": "admin", "rememberMe": "false"}
+      status_code: 200
+    register: result1
+    until: result1.status == 200
+    retries: 60
+    delay: 1
+
+  - name: "Set apiKey  for {{ vm_name }} {{ mgmt_ip_address }}"
+    set_fact:
+      apiKey1: "{{ result1.json.apiKey }}"
+
+  - name: "Check for ixserver process status in {{ vm_name }} {{ mgmt_ip_address }}"
+    uri:
+      url: "https://{{ mgmt_ip_address }}/chassis/api/v2/ixos/chassis"
+      method: GET
+      follow_redirects: all
+      validate_certs: false
+      headers:
+        X-Api-Key: "{{ apiKey1 }}"
+      body_format: json
+      status_code: 200
+    register: result1
+    until: result1.json is defined and result1.json[0].state  == "UP"
+    retries: 60
+    delay: 1
+
+  - debug:
+      msg: "IxServer state is {{ result1.json[0].state }} for {{ vm_name }} {{ mgmt_ip_address }}"
+
+  when: VM_type is defined and VM_type == "keysight_vtm"
 
 # Some testbed may have issue of starting multiple VMs in parallel, this pause is a workaround for this issue
 # A better solution should have been used. But the current used ansible v2.0 has issue with nested loops:
