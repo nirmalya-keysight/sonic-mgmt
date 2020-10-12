@@ -1,6 +1,6 @@
 # Testbed Setup with Keysight Virtual Appliances and IxNetwork
 
-This document describes the steps to setup a testbed with Virtual Test Appliance (in short VTM) and IxNetwork API Server Web edition container.
+This document describes the steps to setup a testbed with Virtual Test Appliance (in short VTM) and IxNetwork API Server container.
 
 The test components like veos, ceos and ptf are not used here.
 
@@ -13,7 +13,7 @@ The schematic diagram below provides an overview of the setup.
 ### Network connections
 - The testbed server has 2 network ports:
   - Trunk port to root fanout switch.
-  - Server management port to manage the server, VTMs and IxNetwork Api Server Web Edition container running on the server.
+  - Server management port to manage the server, VTMs and IxNetwork Api Server container running on the server.
 - The management bridge here referred to as `br1` is connected to the server management port.
 
 ### Virtual Test Appliance module - VTM
@@ -25,7 +25,7 @@ The schematic diagram below provides an overview of the setup.
 
 - Install Ubuntu 18.04 amd64 on the server.
 - Setup internal management network bridge `br1`. A sample `netplan` configuration is as below.
-    ```json
+    ```
     network:
       ethernets:
         ens192:
@@ -57,16 +57,16 @@ The schematic diagram below provides an overview of the setup.
     ```shell
     $ docker load -i docker-sonic-mgmt.gz
     ```
-- Download VTM and IxNetwork Web Edition container images from the following links -
+- Download VTM and IxNetwork API Server container images from the following links -
     - [Virtual Test Appliance (VTM)](https://support.ixiacom.com/support-overview/product-support/downloads-updates/ixvm). The *qcow2* image for *KVM* needs to be downloaded.
-    - [IxNetwork API Server Web Edition (Docker deployment)](https://ks-aws-prd-itshared-opix.s3-us-west-1.amazonaws.com/IxSoftwareUpgrades/IxNetwork/9.0_Update3/Ixia_IxNetworkWeb_Docker_9.00.100.213.tar.bz2).
+    - [IxNetwork API Server](https://ks-aws-prd-itshared-opix.s3-us-west-1.amazonaws.com/IxSoftwareUpgrades/IxNetwork/9.0_Update3/Ixia_IxNetworkWeb_Docker_9.00.100.213.tar.bz2).
 
     Downloaded files would be like below respectively-
     - `Ixia_Virtual_Test_Appliance_9.10_KVM.qcow2.tar.bz2`
     - `Ixia_IxNetworkWeb_Docker_9.10.2007.146.tar.bz2`
 
 - Place the downloaded files in a folder say `~/keysight_images`. This location needs to be mounted on `/images` inside the *sonic-mgmt* container.
-    > **Note** If you load the *IxNetwork API Server Web Edition* docker image in your docker registry then you need not to place `Ixia_IxNetworkWeb_Docker_9.10.2007.146.tar.bz2` inside the `~/keysight_images` folder. In that case you need to consider the `docker_registry_host` in `ansible/vars/docker_registry.yml` file. If local file is used it will not pull from the docker registry.
+    > **Note** If you load the *IxNetwork API Server* docker image in your docker registry then you need not to place `Ixia_IxNetworkWeb_Docker_9.10.2007.146.tar.bz2` inside the `~/keysight_images` folder. In that case you need to consider the `docker_registry_host` in `ansible/vars/docker_registry.yml` file. If local file is used it will not pull from the docker registry.
 
 - Run the `setup-container.sh` in the root directory of the sonic-mgmt repository:
     ```shell
@@ -75,15 +75,14 @@ The schematic diagram below provides an overview of the setup.
     ```
     > e.g. `./setup-container.sh -n sonicmgmt -d /data -v ~/keysight_images`
 
-From now on, all steps are running inside the *sonic-mgmt* docker **unless otherwise specified**.
+    From now on, all steps are running inside the *sonic-mgmt* docker **unless otherwise specified**.
 
-You can enter your sonic-mgmt container with the following command:
+    You can enter your sonic-mgmt container with the following command:
 
-```shell
-$ docker exec -u <alias> -it <container name> bash
-```
+    ```shell
+    $ docker exec -u <alias> -it <container name> bash
+    ```
 
-## Additional steps
 - Setup public key to login into the linux host from sonic-mgmt docker. You may use `ssk-keygen` and `ssh-copy-id` for the same.
 - Create dummy `password.txt` under `/data/sonic-mgmt/ansible`
 
@@ -93,25 +92,9 @@ $ docker exec -u <alias> -it <container name> bash
     ```
     foo ALL=(ALL) NOPASSWD:ALL
     ```
-- Modify veos/*your configuration file* to use the user name, e.g., `foo` to login linux host (this can be your username on the host).
 
-    ```shell
-    lgh@gulv-vm2:/data/sonic-mgmt/ansible$ git diff
-    diff --git a/ansible/veos_vtb b/ansible/veos_vtb
-    index 3e7b3c4e..edabfc40 100644
-    --- a/ansible/veos_vtb
-    +++ b/ansible/veos_vtb
-    @@ -73,7 +73,7 @@ vm_host_1:
-    hosts:
-        STR-ACS-VSERV-01:
-        ansible_host: 10.250.0.101
-    -      ansible_user: use_own_value
-    +      ansible_user: foo
-
-    vms_1:
-    hosts:
-    ```
-- Modify `ansible/group_vars/vm_host/creds.yml` accordingly.
+## Modify configuration files
+- Modify credentials in `ansible/group_vars/vm_host/creds.yml` accordingly.
 - In `ansible/group_vars/vm_host/main.yml` add/modify the below lines
     ```
     vtm_image_name: Ixia_Virtual_Test_Appliance_9.10_KVM.qcow2
@@ -119,32 +102,36 @@ $ docker exec -u <alias> -it <container name> bash
     ixnetwork_api_server_docker_image_name: ixnetworkweb_9.10.2007.146_image
     ```
 
-## Modify the configuration file veos/other as per need.
-Example below. (or you may refer to `keysight_testbed_config`)
-```json
-server_1:
-    vars:
-        host_var_file: host_vars/STR-ACS-VSERV-01.yml
-    children:
-        vm_host_1:
-        vms_1:
+- **Modify configuration file for the testbed server** -
 
-vm_host_1:
-    hosts:
-        STR-ACS-VSERV-01:
-            ansible_host: 10.250.0.101
-            ansible_user: foo
+    Modify veos/*your configuration file* to use the username in `ansible_user`, e.g., `foo` to login to linux host (this can be your username on the host). Edit IP addresses and `host_var_file` as per need.
 
-vms_1:
-    hosts:
-        VM0120:
-            ansible_host: 10.250.0.102
+    Example snippet below - (Refer to the `sonic-mgmt/ansible/veos` or `sonic-mgmt/ansible/veos_vtb` files.)
+    ```
+    server_1:
+        vars:
+            host_var_file: host_vars/STR-ACS-VSERV-01.yml
+        children:
+            vm_host_1:
+            vms_1:
 
-```
-> Note: VM entries should have a prefix 'VM' in their name.
+    # Entry for IxNetwork API Server
+    vm_host_1:
+        hosts:
+            STR-ACS-VSERV-01:
+                ansible_host: 10.250.0.101
+                ansible_user: foo
+
+    # Entry for Virtual Test Appliance - VTM
+    vms_1:
+        hosts:
+            VM0120:
+                ansible_host: 10.250.0.102
+    ```
+    > Note: VTM entries should have a prefix 'VM' in their name.
 
 ## Setup Virtual Test Appliances (VTM) in the server
-To start vtm vms –
+To start VTM –
 ```shell
 $ ./testbed-cli.sh -m keysight_testbed_config -n 1 -k keysight_vtm start-vms server_1 password.txt
 ```
@@ -153,7 +140,7 @@ Here `-k` option specifies to deploy `keysight_vtm`.
 Please note: Here "password.txt" is the Ansible Vault password file name/path. Ansible allows user to use Ansible Vault to encrypt password files. By default, this shell script requires a password file. If you are not using Ansible Vault, just create a file with a dummy password and pass the filename to the command line. The file name and location is created and maintained by user.
 
 
-## Setup IxNetwork API Server Web Edition
+## Setup IxNetwork API Server
 - Edit the testbed-csv file to add entry like below-
     ```csv
     # conf-name,group-name,topo,ptf_image_name,ptf,ptf_ip,ptf_ipv6,server,vm_base,dut,comment
@@ -164,23 +151,23 @@ Please note: Here "password.txt" is the Ansible Vault password file name/path. A
 
 - For topology configuration refer to the `topo_t0_keysight.yml` file. The `vtm_port_index` field is used to specify respective VTM test interface.
 
-- To start IxNetwork API Server run
+- To start IxNetwork API Server
     ```shell
     $ ./testbed-cli.sh -t vtestbed.csv -m keysight_testbed_config add-topo example-ixia password.txt
     ```
 
-## Stop IxNetwork API Server Web Edition docker container
+## Stop IxNetwork API Server
 ```shell
 $ ./testbed-cli.sh -t vtestbed.csv -m keysight_testbed_config remove-topo example-ixia password.txt
 ```
 
-## Stop VTMs
+## Stop Virtual Test Appliances (VTM)
 ```shell
 $ ./testbed-cli.sh -m keysight_testbed_config -n 1 -k keysight_vtm stop-vms server_1 password.txt
 ```
 
 ## TL;DR
-- Download [Virtual Test Appliance (VTM) qcow2 image](https://support.ixiacom.com/support-overview/product-support/downloads-updates/ixvm) and [IxNetwork API Server Web Edition (Docker deployment)](https://ks-aws-prd-itshared-opix.s3-us-west-1.amazonaws.com/IxSoftwareUpgrades/IxNetwork/9.0_Update3/Ixia_IxNetworkWeb_Docker_9.00.100.213.tar.bz2). Place the files in `~/keysight_images`.
+- Download [Virtual Test Appliance (VTM) qcow2 image](https://support.ixiacom.com/support-overview/product-support/downloads-updates/ixvm) and [IxNetwork API Server](https://ks-aws-prd-itshared-opix.s3-us-west-1.amazonaws.com/IxSoftwareUpgrades/IxNetwork/9.0_Update3/Ixia_IxNetworkWeb_Docker_9.00.100.213.tar.bz2). Place the files in `~/keysight_images`.
 - Create management bridge.
 - Clone https://github.com/Azure/sonic-mgmt
 - Download and run [sonic-mgmt]((https://sonic-jenkins.westus2.cloudapp.azure.com/job/bldenv/job/docker-sonic-mgmt/lastSuccessfulBuild/artifact/sonic-buildimage/target/docker-sonic-mgmt.gz)) docker using `./setup-container.sh -n sonicmgmt -d /data -v ~/keysight_images`
@@ -197,6 +184,6 @@ $ ./testbed-cli.sh -m keysight_testbed_config -n 1 -k keysight_vtm stop-vms serv
     example-ixia,vms6-1,t0_keysight,docker-keysight-api-server,example-ixia-ptf-1,10.39.32.194/22,,server_1,VM0120,[vlab-01],Test with Keysight API Server
     ```
 - Start VTM - `./testbed-cli.sh -m keysight_testbed_config -n 1 -k keysight_vtm start-vms server_1 password.txt`
-- Start IxNetwork API Server container - `./testbed-cli.sh -t vtestbed.csv -m keysight_testbed_config add-topo example-ixia password.txt`
+- Start IxNetwork API Server - `./testbed-cli.sh -t vtestbed.csv -m keysight_testbed_config add-topo example-ixia password.txt`
 - To stop VTM - `./testbed-cli.sh -m keysight_testbed_config -n 1 -k keysight_vtm stop-vms server_1 password.txt`
-- To Stop IxNetwork API Server container - `./testbed-cli.sh -m keysight_testbed_config -n 1 -k keysight_vtm stop-vms server_1 password.txt`
+- To Stop IxNetwork API Server - `./testbed-cli.sh -m keysight_testbed_config -n 1 -k keysight_vtm stop-vms server_1 password.txt`
