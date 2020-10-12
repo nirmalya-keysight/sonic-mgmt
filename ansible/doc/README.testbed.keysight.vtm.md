@@ -1,4 +1,4 @@
-# Testbed Setup with Keysight Virtual Appliances and IxNetwork
+# Testbed Setup with Keysight Virtual Appliances and IxNetwork API Server container
 
 This document describes the steps to setup a testbed with Virtual Test Appliance (in short VTM) and IxNetwork API Server container.
 
@@ -48,7 +48,7 @@ The schematic diagram below provides an overview of the setup.
     $ git clone https://github.com/Azure/sonic-mgmt
     ```
 
-## Running the sonic-mgmt container
+## Run the sonic-mgmt container with VTM specification
 - Download pre-built *sonic-mgmt* image from [here](https://sonic-jenkins.westus2.cloudapp.azure.com/job/bldenv/job/docker-sonic-mgmt/lastSuccessfulBuild/artifact/sonic-buildimage/target/docker-sonic-mgmt.gz).
     ```shell
     $ wget https://sonic-jenkins.westus2.cloudapp.azure.com/job/bldenv/job/docker-sonic-mgmt/lastSuccessfulBuild/artifact/sonic-buildimage/target/docker-sonic-mgmt.gz
